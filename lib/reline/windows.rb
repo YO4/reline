@@ -215,6 +215,21 @@ class Reline::Windows
 
   def self.process_key_event(repeat_count, virtual_key_code, virtual_scan_code, char_code, control_key_state)
 
+    # high-surrogate
+    if char_code & 0xDC00 == 0xD800
+      @@output_buf.push char_code
+      return
+    end
+    # low-surrogate
+    if char_code & 0xDC00 == 0xDC00
+      if @@output_buf[-1] & 0xDC00 == 0xD800
+        char_code = 0x10000 + (@@output_buf.pop - 0xD800) * 0x400 + char_code - 0xDC00
+      else
+        # no high-surrogate. ignored.
+        return
+      end
+    end
+
     key = KeyEventRecord.new(virtual_key_code, char_code, control_key_state)
 
     match = KEY_MAP.find { |args,| key.matches?(**args) }
@@ -239,30 +254,43 @@ class Reline::Windows
       next if @@GetNumberOfConsoleInputEvents.(@@hConsoleInputHandle, num_of_events) == 0 or num_of_events.unpack1('L') == 0
       input_record = 0.chr * 18
       read_event = 0.chr * 4
-      if @@ReadConsoleInputW.(@@hConsoleInputHandle, input_record, 1, read_event) != 0
-        event = input_record[0, 2].unpack1('s*')
-        case event
-        when WINDOW_BUFFER_SIZE_EVENT
-          @@winch_handler.()
-        when KEY_EVENT
-          key_down = input_record[4, 4].unpack1('l*')
-          repeat_count = input_record[8, 2].unpack1('s*')
-          virtual_key_code = input_record[10, 2].unpack1('s*')
-          virtual_scan_code = input_record[12, 2].unpack1('s*')
-          char_code = input_record[14, 2].unpack1('S*')
-          control_key_state = input_record[16, 2].unpack1('S*')
-          is_key_down = key_down.zero? ? false : true
-          if is_key_down
-            process_key_event(repeat_count, virtual_key_code, virtual_scan_code, char_code, control_key_state)
+      # read all events prevent for separated UTF-16 surrogate pair
+      begin
+        if @@ReadConsoleInputW.(@@hConsoleInputHandle, input_record, 1, read_event) != 0
+          event = input_record[0, 2].unpack1('s*')
+          case event
+          when WINDOW_BUFFER_SIZE_EVENT
+            @@winch_handler.()
+          when KEY_EVENT
+            key_down = input_record[4, 4].unpack1('l*')
+            repeat_count = input_record[8, 2].unpack1('s*')
+            virtual_key_code = input_record[10, 2].unpack1('s*')
+            virtual_scan_code = input_record[12, 2].unpack1('s*')
+            char_code = input_record[14, 2].unpack1('S*')
+            control_key_state = input_record[16, 2].unpack1('S*')
+            is_key_down = key_down.zero? ? false : true
+            if is_key_down
+              process_key_event(repeat_count, virtual_key_code, virtual_scan_code, char_code, control_key_state)
+            end
           end
         end
-      end
+      end while @@GetNumberOfConsoleInputEvents.(@@hConsoleInputHandle, num_of_events) != 0 and num_of_events.unpack1('L') > 0
     end
   end
 
   def self.getc
-    check_input_event
-    @@output_buf.shift
+    while true
+      check_input_event
+      c = @@output_buf.shift
+      # ignore orphaned high-surrogate code
+      next if c > 255
+      unless @@output_buf.empty?
+        while @@output_buf[0] > 255
+          @@output_buf.shift
+        end
+      end
+      return c
+    end
   end
 
   def self.ungetc(c)
