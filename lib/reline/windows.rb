@@ -321,57 +321,56 @@ class Reline::Windows
   end
 
   def self.get_screen_size
-    unless csbi = get_console_screen_buffer_info
-      return [1, 1]
-    end
-    csbi[0, 4].unpack('SS').reverse
+    @@output.winsize
+  rescue Errno::EBADF
+    [24, 80]
+  end
+
+  def self.set_screen_size(rows, columns)
+    raise NotImplementedError
   end
 
   def self.cursor_pos
-    unless csbi = get_console_screen_buffer_info
-      return Reline::CursorPos.new(0, 0)
-    end
-    x = csbi[4, 2].unpack1('s*')
-    y = csbi[6, 2].unpack1('s*')
-    Reline::CursorPos.new(x, y)
+    csbi = 0.chr * 22
+    @@GetConsoleScreenBufferInfo.call(@@hConsoleHandle, csbi)
+    x, y, left, top = csbi.unpack 'x4ssx2ss'
+    Reline::CursorPos.new(x - left, y - top)
   end
 
-  def self.move_cursor_column(val)
-    @@SetConsoleCursorPosition.call(@@hConsoleHandle, cursor_pos.y * 65536 + val)
+  def self.move_cursor_column(x)
+    @@output.write "\e[#{x + 1}G"
   end
 
-  def self.move_cursor_up(val)
-    if val > 0
-      y = cursor_pos.y - val
-      y = 0 if y < 0
-      @@SetConsoleCursorPosition.call(@@hConsoleHandle, y * 65536 + cursor_pos.x)
-    elsif val < 0
-      move_cursor_down(-val)
+  def self.move_cursor_up(x)
+    if x > 0
+      @@output.write "\e[#{x}A"
+    elsif x < 0
+      move_cursor_down(-x)
     end
   end
 
-  def self.move_cursor_down(val)
-    if val > 0
-      return unless csbi = get_console_screen_buffer_info
-      screen_height = get_screen_size.first
-      y = cursor_pos.y + val
-      y = screen_height - 1 if y > (screen_height - 1)
-      @@SetConsoleCursorPosition.call(@@hConsoleHandle, (cursor_pos.y + val) * 65536 + cursor_pos.x)
-    elsif val < 0
-      move_cursor_up(-val)
+  def self.move_cursor_down(x)
+    if x > 0
+      @@output.write "\e[#{x}B"
+    elsif x < 0
+      move_cursor_up(-x)
     end
+  end
+
+  def self.hide_cursor
+    @@output.write "\e[?25l"
+  end
+
+  def self.show_cursor
+    @@output.write "\e[?25h"
   end
 
   def self.erase_after_cursor
-    return unless csbi = get_console_screen_buffer_info
-    attributes = csbi[8, 2].unpack1('S')
-    cursor = csbi[4, 4].unpack1('L')
-    written = 0.chr * 4
-    @@FillConsoleOutputCharacter.call(@@hConsoleHandle, 0x20, get_screen_size.last - cursor_pos.x, cursor, written)
-    @@FillConsoleOutputAttribute.call(@@hConsoleHandle, attributes, get_screen_size.last - cursor_pos.x, cursor, written)
+    @@output.write "\e[K"
   end
 
   def self.scroll_down(val)
+    # on Windows Terminal, scroll with (CSI S) doesnt store backbuffer. so use \n
     return if val < 0
 
     csbi = 0.chr * 22
