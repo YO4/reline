@@ -1,0 +1,124 @@
+#!/usr/bin/env ruby
+
+# text from https://github.com/ruby/reline/issues/74
+
+
+def prepare_text(loops: 1, iteration: 1, sleep: nil, clip: nil)
+
+  header = <<-'EOT'
+  def each_top_level_statement
+  EOT
+
+  body = <<-'EOT'
+    initialize_input
+    catch(:TERM_INPUT) do
+      loop do
+        begin
+          prompt
+          unless l = lex
+            throw :TERM_INPUT if @line == ''
+          else
+            @line_no += l.count("\n")
+            next if l == "\n"
+            @line.concat l
+            if @code_block_open or @ltype or @continue or @indent > 0
+              next
+            end
+          end
+          if @line != "\n"
+            @line.force_encoding(@io.encoding)
+            yield @line, @exp_line_no
+          end
+          break if @io.eof?
+          @line = ''
+          @exp_line_no = @line_no
+
+          @indent = 0
+        rescue TerminateLineInput
+          initialize_input
+          prompt
+        end
+      end
+    end
+  EOT
+
+  trailer = <<-'EOT'
+  end
+  EOT
+
+  unless loops
+    if ARGV[0]
+      loops = ARGV[0].to_i
+    else
+      loops = 1
+    end
+  end
+
+  if iteration == 0
+    iteration = 1
+    no_measure = true
+  end
+
+  text = header + body * loops + trailer
+
+  if !no_measure
+    text = "t = Time.now\n#{text}t = (Time.now-t)*1000\n"
+  end
+
+  if iteration > 1
+    text = "samples = [];\n" +
+      "Reline::IOGate.clear_screen\n#{text}samples<<t\n" * iteration +
+      "p samples; p samples.sum / samples.size\n"
+  end
+
+  if sleep
+    text = "sleep #{sleep}\n#{text}"
+  end
+
+  if clip == nil
+    if Object.const_defined?(:Reline)
+      if Reline::IOGate.win?
+        clip = true
+      end
+    end
+  end
+  if clip
+    IO.popen('clip.exe', 'w') { |f| f.write text } # windows specific
+    nil
+  else
+    text
+  end
+end
+
+
+if $0 == __FILE__
+  require 'optparse'
+
+  parser = OptionParser.new
+  params = {loops: 1, iteration: 1, sleep: nil, clip: false}
+
+  parser.banner = "Usage: #{$0} [options] [nloops]"
+
+  parser.on('-l', '--loops=N', Integer, 'output text N times (same as nloops)')
+  parser.on('-i', '--iteration=N', Integer, 'measurement iterates N times. 0 indicates no time mesurement')
+  parser.on('-s', '--sleep=T', Numeric, 'write \'sleep T\' first')
+  parser.on('-c', '--clip', '(copy)output goes paste buffer')
+
+  parser.order!(ARGV, into: params) { |nloops| params[:loops] = nloops.to_i }
+
+  if params[:loops] < 1
+    puts "loops must >=1"
+    puts parser.help
+    exit
+  end
+
+  if params[:iteration] < 0
+    puts "iteration must >=0"
+    puts parser.help
+    exit
+  end
+
+  text = prepare_text(**params)
+  print text if text
+end
+
