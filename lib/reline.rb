@@ -286,7 +286,6 @@ module Reline
         $stderr.sync = true
         $stderr.puts "Reline is used by #{Process.pid}"
       end
-      otio = Reline::IOGate.prep
 
       may_req_ambiguous_char_width
       line_editor.reset(prompt, encoding: Reline::IOGate.encoding)
@@ -319,6 +318,7 @@ module Reline
       line_editor.rerender
 
       begin
+        otio = Reline::IOGate.prep
         line_editor.set_signal_handlers
         prev_pasting_state = false
         loop do
