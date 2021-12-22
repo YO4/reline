@@ -344,19 +344,10 @@ module Reline
         Reline::IOGate.move_cursor_column(0)
       rescue Errno::EIO
         # Maybe the I/O has been closed.
-      rescue StandardError => e
+      ensure
         line_editor.finalize
         Reline::IOGate.deprep(otio)
-        raise e
-      rescue Exception
-        # Including Interrupt
-        line_editor.finalize
-        Reline::IOGate.deprep(otio)
-        raise
       end
-
-      line_editor.finalize
-      Reline::IOGate.deprep(otio)
     end
 
     # GNU Readline waits for "keyseq-timeout" milliseconds to see if the ESC
