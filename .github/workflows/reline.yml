@@ -145,3 +145,42 @@ jobs:
         run: WITH_VTERM=1 bundle install
       - name: rake test_yamatanooroti
         run: WITH_VTERM=1 bundle exec rake test_yamatanooroti
+
+  windows-yamatanooroti:
+    needs: ruby-versions
+    name: >-
+      ${{ matrix.ruby }} ${{ matrix.os }} ${{ matrix.console }} win-yamatanooroti
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby: ${{ fromJson(needs.ruby-versions.outputs.versions) }}
+        os: [windows-2019, windows-2022]
+        console: [ conhost, legacy-conhost, stable ]
+        exclude:
+          - ruby: truffleruby
+          - ruby: truffleruby-head
+          - console: stable
+            os: windows-2019
+          - console: legacy-conhost
+            os: windows-2022
+        include:
+          - os: windows-2022
+            ruby: 3.3
+            console: preview
+          - os: windows-2022
+            ruby: 3.3
+            console: canary
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+      - name: Install dependencies
+        run: bundle install
+      - name: rake test_yamatanooroti
+        env:
+          RUBYOPT: -Eutf-8
+        run: bundle exec rake test_yamatanooroti TESTOPTS="-v --wt_dir=./tmp --windows=${{ matrix.console }}"
