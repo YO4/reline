@@ -1222,16 +1222,31 @@ begin
       ENV['RELINE_TEST_PROMPT'] = '> '
       start_terminal(20, 5, %W{ruby -I#{@pwd}/lib #{@pwd}/test/reline/yamatanooroti/multiline_repl --dialog fullwidth,scrollkey,scrollbar}, startup_message: 'Multiline REPL.')
       6.times{ write('j') }
-      assert_screen(<<~'EOC')
-        Multi
-        line
-        REPL.
-        >
-        オー
-        グ言▄
-        備え█
-        ち、█
-      EOC
+      unless Yamatanooroti.win? && Yamatanooroti.options.windows == :"legacy-conhost"
+        assert_screen(<<~'EOC')
+          Multi
+          line
+          REPL.
+          >
+          オー
+          グ言▄
+          備え█
+          ち、█
+        EOC
+      else
+        # "Multiline REPL." is printed with ```puts``` and causes forced line break. This behavior is out of scope.
+        assert_screen(<<~'EOC')
+          Multi
+          line
+          REPL.
+          
+          >
+          オー
+          グ言▄
+          備え█
+          ち、█
+        EOC
+      end
       close
     end
 
