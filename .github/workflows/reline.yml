@@ -153,3 +153,33 @@ jobs:
         run: WITH_VTERM=1 bundle install
       - name: rake test_yamatanooroti
         run: WITH_VTERM=1 bundle exec rake test_yamatanooroti
+
+  windows-yamatanooroti:
+    needs: ruby-versions
+    name: >-
+      win-yamaoro ${{ matrix.os }} ${{ matrix.console }} ${{ matrix.ruby }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby: ${{ fromJson(needs.ruby-versions.outputs.versions) }}
+        os: [windows-2019, windows-2022]
+        console: [ conhost, legacy-conhost, 1.21, 1.22preview, canary ]
+        exclude:
+          - console: 1.21
+            os: windows-2019
+          - console: 1.22preview
+            os: windows-2019
+          - console: canary
+            os: windows-2019
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+      - name: Install dependencies
+        run: bundle install
+      - name: rake test_yamatanooroti
+        run: bundle exec rake test_yamatanooroti TESTOPTS="-v --wt_dir=./tmp --windows=${{ matrix.console }}"
