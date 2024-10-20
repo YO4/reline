@@ -170,4 +170,6 @@ jobs:
       - name: Install dependencies
         run: bundle install
       - name: rake test_yamatanooroti
+        env:
+          RUBYOPT: -Eutf-8
         run: bundle exec rake test_yamatanooroti TESTOPTS="-v --wt_dir=./tmp --windows=${{ matrix.console }}"
