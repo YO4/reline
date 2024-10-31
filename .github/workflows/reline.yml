@@ -157,7 +157,7 @@ jobs:
   windows-yamatanooroti:
     needs: ruby-versions
     name: >-
-      win-yamaoro ${{ matrix.os }} ${{ matrix.console }} ${{ matrix.ruby }}
+      ${{ matrix.ruby }} ${{ matrix.os }} ${{ matrix.console }} win-yamatanooroti
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -166,6 +166,8 @@ jobs:
         os: [windows-2019, windows-2022]
         console: [ conhost, legacy-conhost, stable ]
         exclude:
+          - ruby: truffleruby
+          - ruby: truffleruby-head
           - console: stable
             os: windows-2019
           - console: legacy-conhost
