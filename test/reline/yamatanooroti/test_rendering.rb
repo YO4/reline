@@ -1257,9 +1257,7 @@ begin
         omit "codepage 932 not supported" if !codepage_success?
       end
       6.times{ write('j') }
-      unless Yamatanooroti.win? &&
-         (Yamatanooroti.options.windows == :"legacy-conhost" ||
-          Yamatanooroti.options.windows == :conhost && (RUBY_VERSION < "3.0" || RUBY_ENGINE != "ruby"))
+      unless Yamatanooroti.win? && Yamatanooroti.options.windows == :"legacy-conhost"
         assert_screen(<<~'EOC')
           Multi
           line
@@ -1272,8 +1270,6 @@ begin
         EOC
       else
         # "Multiline REPL." is printed with ```puts``` and causes forced line break. This behavior is out of scope.
-        # legacy-conhost has forced linebreak at EOL
-        # ruby >= 3.0 enables VT output at startup on conhost but prior versions not. So same as legacy-conhost behavior.
         assert_screen(<<~'EOC')
           Multi
           line
