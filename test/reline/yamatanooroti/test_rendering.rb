@@ -1257,31 +1257,16 @@ begin
         omit "codepage 932 not supported" if !codepage_success?
       end
       6.times{ write('j') }
-      unless Yamatanooroti.win? && Yamatanooroti.options.windows == :"legacy-conhost"
-        assert_screen(<<~'EOC')
-          Multi
-          line
-          REPL.
-          >
-          オー
-          グ言▄
-          備え█
-          ち、█
-        EOC
-      else
-        # "Multiline REPL." is printed with ```puts``` and causes forced line break. This behavior is out of scope.
-        assert_screen(<<~'EOC')
-          Multi
-          line
-          REPL.
-          
-          >
-          オー
-          グ言▄
-          備え█
-          ち、█
-        EOC
-      end
+      assert_screen(<<~'EOC')
+        Multi
+        line
+        REPL.
+        >
+        オー
+        グ言▄
+        備え█
+        ち、█
+      EOC
       close
     end
 
