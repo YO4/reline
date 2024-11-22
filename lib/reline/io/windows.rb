@@ -5,30 +5,17 @@ class Reline::Windows < Reline::IO
     @input_buf = []
     @output_buf = []
 
+    @input = STDIN
     @output = STDOUT
     @hsg = nil
-    @getwch = Win32API.new('msvcrt', '_getwch', [], 'I')
     @kbhit = Win32API.new('msvcrt', '_kbhit', [], 'I')
-    @GetKeyState = Win32API.new('user32', 'GetKeyState', ['L'], 'L')
-    @GetConsoleScreenBufferInfo = Win32API.new('kernel32', 'GetConsoleScreenBufferInfo', ['L', 'P'], 'L')
-    @SetConsoleCursorPosition = Win32API.new('kernel32', 'SetConsoleCursorPosition', ['L', 'L'], 'L')
     @GetStdHandle = Win32API.new('kernel32', 'GetStdHandle', ['L'], 'L')
-    @FillConsoleOutputCharacter = Win32API.new('kernel32', 'FillConsoleOutputCharacter', ['L', 'L', 'L', 'L', 'P'], 'L')
-    @ScrollConsoleScreenBuffer = Win32API.new('kernel32', 'ScrollConsoleScreenBuffer', ['L', 'P', 'P', 'L', 'P'], 'L')
     @hConsoleHandle = @GetStdHandle.call(STD_OUTPUT_HANDLE)
     @hConsoleInputHandle = @GetStdHandle.call(STD_INPUT_HANDLE)
     @GetNumberOfConsoleInputEvents = Win32API.new('kernel32', 'GetNumberOfConsoleInputEvents', ['L', 'P'], 'L')
     @ReadConsoleInputW = Win32API.new('kernel32', 'ReadConsoleInputW', ['L', 'P', 'L', 'P'], 'L')
-    @GetFileType = Win32API.new('kernel32', 'GetFileType', ['L'], 'L')
-    @GetFileInformationByHandleEx = Win32API.new('kernel32', 'GetFileInformationByHandleEx', ['L', 'I', 'P', 'L'], 'I')
-    @FillConsoleOutputAttribute = Win32API.new('kernel32', 'FillConsoleOutputAttribute', ['L', 'L', 'L', 'L', 'P'], 'L')
-    @SetConsoleCursorInfo = Win32API.new('kernel32', 'SetConsoleCursorInfo', ['L', 'P'], 'L')
 
-    @GetConsoleMode = Win32API.new('kernel32', 'GetConsoleMode', ['L', 'P'], 'L')
-    @SetConsoleMode = Win32API.new('kernel32', 'SetConsoleMode', ['L', 'L'], 'L')
     @WaitForSingleObject = Win32API.new('kernel32', 'WaitForSingleObject', ['L', 'L'], 'L')
-
-    @legacy_console = getconsolemode & ENABLE_VIRTUAL_TERMINAL_PROCESSING == 0
   end
 
   def encoding
@@ -176,37 +163,8 @@ class Reline::Windows < Reline::IO
     mode.unpack1('L')
   end
 
-  private def setconsolemode(mode)
-    call_with_console_handle(@SetConsoleMode, mode)
-  end
-
-  #if @legacy_console
-  #  setconsolemode(getconsolemode() | ENABLE_VIRTUAL_TERMINAL_PROCESSING)
-  #  @legacy_console = (getconsolemode() & ENABLE_VIRTUAL_TERMINAL_PROCESSING == 0)
-  #end
-
   def msys_tty?(io = @hConsoleInputHandle)
-    # check if fd is a pipe
-    if @GetFileType.call(io) != FILE_TYPE_PIPE
-      return false
-    end
-
-    bufsize = 1024
-    p_buffer = "\0" * bufsize
-    res = @GetFileInformationByHandleEx.call(io, FILE_NAME_INFO, p_buffer, bufsize - 2)
-    return false if res == 0
-
-    # get pipe name: p_buffer layout is:
-    #   struct _FILE_NAME_INFO {
-    #     DWORD FileNameLength;
-    #     WCHAR FileName[1];
-    #   } FILE_NAME_INFO
-    len = p_buffer[0, 4].unpack1("L")
-    name = p_buffer[4, len].encode(Encoding::UTF_8, Encoding::UTF_16LE, invalid: :replace)
-
-    # Check if this could be a MSYS2 pty pipe ('\msys-XXXX-ptyN-XX')
-    # or a cygwin pty pipe ('\cygwin-XXXX-ptyN-XX')
-    name =~ /(msys-|cygwin-).*-pty/ ? true : false
+    false # not supported
   end
 
   KEY_MAP = [
@@ -267,13 +225,13 @@ class Reline::Windows < Reline::IO
     @output_buf.concat(key.char.bytes)
   end
 
-  def check_input_event
+  def check_input_event(timeout_second)
+    initial_time = Time.now
     num_of_events = 0.chr * 8
     while @output_buf.empty?
       Reline.core.line_editor.handle_signal
       if @WaitForSingleObject.(@hConsoleInputHandle, 100) != 0 # max 0.1 sec
-        # prevent for background consolemode change
-        @legacy_console = getconsolemode & ENABLE_VIRTUAL_TERMINAL_PROCESSING == 0
+        break if Time.now - initial_time > timeout_second
         next
       end
       next if @GetNumberOfConsoleInputEvents.(@hConsoleInputHandle, num_of_events) == 0 or num_of_events.unpack1('L') == 0
@@ -308,8 +266,8 @@ class Reline::Windows < Reline::IO
     yield
   end
 
-  def getc(_timeout_second)
-    check_input_event
+  def getc(timeout_second)
+    check_input_event(timeout_second)
     @output_buf.shift
   end
 
@@ -331,76 +289,81 @@ class Reline::Windows < Reline::IO
     end
   end
 
-  def get_console_screen_buffer_info
-    # CONSOLE_SCREEN_BUFFER_INFO
-    # [ 0,2] dwSize.X
-    # [ 2,2] dwSize.Y
-    # [ 4,2] dwCursorPositions.X
-    # [ 6,2] dwCursorPositions.Y
-    # [ 8,2] wAttributes
-    # [10,2] srWindow.Left
-    # [12,2] srWindow.Top
-    # [14,2] srWindow.Right
-    # [16,2] srWindow.Bottom
-    # [18,2] dwMaximumWindowSize.X
-    # [20,2] dwMaximumWindowSize.Y
-    csbi = 0.chr * 22
-    if call_with_console_handle(@GetConsoleScreenBufferInfo, csbi) != 0
-      # returns [width, height, x, y, attributes, left, top, right, bottom]
-      csbi.unpack("s9")
-    else
-      return nil
-    end
+  def get_screen_size
+    input = @input.tty? ? IO.console : @input
+    s = input.winsize
+    return s if s[0] > 0 && s[1] > 0
+    s = [ENV["LINES"].to_i, ENV["COLUMNS"].to_i]
+    return s if s[0] > 0 && s[1] > 0
+    [24, 80]
+  rescue Errno::ENOTTY, Errno::ENODEV, Errno::EBADF
+    [24, 80]
   end
 
-  ALTERNATIVE_CSBI = [80, 24, 0, 0, 7, 0, 0, 79, 23].freeze
+  def set_screen_size(rows, columns)
+    raise NotImplementedError
+  end
 
-  def get_screen_size
-    width, _, _, _, _, _, top, _, bottom = get_console_screen_buffer_info || ALTERNATIVE_CSBI
-    [bottom - top + 1, width]
+  private def cursor_pos_internal(timeout:)
+    match = nil
+    @input.raw do |stdin|
+      @output << "\e[6n"
+      @output.flush
+      timeout_at = Time.now + timeout
+      buf = +''
+      while (wait = timeout_at - Time.now) > 0 && c = getc(wait)
+        buf << c
+        if (match = buf.match(/\e\[(?<row>\d+);(?<column>\d+)R/))
+          buf = match.pre_match + match.post_match
+          break
+        end
+      end
+      buf.chars.reverse_each do |ch|
+        ungetc ch.ord
+      end
+    end
+    [match[:column].to_i - 1, match[:row].to_i - 1] if match
   end
 
   def cursor_pos
-    _, _, x, y, _, _, top, = get_console_screen_buffer_info || ALTERNATIVE_CSBI
-    Reline::CursorPos.new(x, y - top)
+    col, row = cursor_pos_internal(timeout: 0.5) if both_tty?
+    Reline::CursorPos.new(col || 0, row || 0)
   end
 
-  def move_cursor_column(val)
-    _, _, _, y, = get_console_screen_buffer_info
-    call_with_console_handle(@SetConsoleCursorPosition, y * 65536 + val) if y
+  def both_tty?
+    @input.tty? && @output.tty?
   end
 
-  def move_cursor_up(val)
-    if val > 0
-      _, _, x, y, _, _, top, = get_console_screen_buffer_info
-      return unless y
-      y = (y - top) - val
-      y = 0 if y < 0
-      call_with_console_handle(@SetConsoleCursorPosition, (y + top) * 65536 + x)
-    elsif val < 0
-      move_cursor_down(-val)
+  def move_cursor_column(x)
+    @output.write "\e[#{x + 1}G"
+  end
+
+  def move_cursor_up(x)
+    if x > 0
+      @output.write "\e[#{x}A"
+    elsif x < 0
+      move_cursor_down(-x)
     end
   end
 
-  def move_cursor_down(val)
-    if val > 0
-      _, _, x, y, _, _, top, _, bottom = get_console_screen_buffer_info
-      return unless y
-      screen_height = bottom - top
-      y = (y - top) + val
-      y = screen_height if y > screen_height
-      call_with_console_handle(@SetConsoleCursorPosition, (y + top) * 65536 + x)
-    elsif val < 0
-      move_cursor_up(-val)
+  def move_cursor_down(x)
+    if x > 0
+      @output.write "\e[#{x}B"
+    elsif x < 0
+      move_cursor_up(-x)
     end
+  end
+
+  def hide_cursor
+    @output.write "\e[?25l"
+  end
+
+  def show_cursor
+    @output.write "\e[?25h"
   end
 
   def erase_after_cursor
-    width, _, x, y, attributes, = get_console_screen_buffer_info
-    return unless x
-    written = 0.chr * 4
-    call_with_console_handle(@FillConsoleOutputCharacter, 0x20, width - x, y * 65536 + x, written)
-    call_with_console_handle(@FillConsoleOutputAttribute, attributes, width - x, y * 65536 + x, written)
+    @output.write "\e[K"
   end
 
   # This only works when the cursor is at the bottom of the scroll range
@@ -412,36 +375,8 @@ class Reline::Windows < Reline::IO
   end
 
   def clear_screen
-    if @legacy_console
-      width, _, _, _, attributes, _, top, _, bottom = get_console_screen_buffer_info
-      return unless width
-      fill_length = width * (bottom - top + 1)
-      screen_topleft = top * 65536
-      written = 0.chr * 4
-      call_with_console_handle(@FillConsoleOutputCharacter, 0x20, fill_length, screen_topleft, written)
-      call_with_console_handle(@FillConsoleOutputAttribute, attributes, fill_length, screen_topleft, written)
-      call_with_console_handle(@SetConsoleCursorPosition, screen_topleft)
-    else
-      @output.write "\e[2J" "\e[H"
-    end
-  end
-
-  def set_screen_size(rows, columns)
-    raise NotImplementedError
-  end
-
-  def hide_cursor
-    size = 100
-    visible = 0 # 0 means false
-    cursor_info = [size, visible].pack('Li')
-    call_with_console_handle(@SetConsoleCursorInfo, cursor_info)
-  end
-
-  def show_cursor
-    size = 100
-    visible = 1 # 1 means true
-    cursor_info = [size, visible].pack('Li')
-    call_with_console_handle(@SetConsoleCursorInfo, cursor_info)
+    @output.write "\e[2J"
+    @output.write "\e[1;1H"
   end
 
   def set_winch_handler(&handler)
@@ -458,25 +393,7 @@ class Reline::Windows < Reline::IO
   end
 
   def disable_auto_linewrap(setting = true, &block)
-    mode = getconsolemode
-    if 0 == (mode & ENABLE_VIRTUAL_TERMINAL_PROCESSING)
-      if block
-        begin
-          setconsolemode(mode & ~ENABLE_WRAP_AT_EOL_OUTPUT)
-          block.call
-        ensure
-          setconsolemode(mode | ENABLE_WRAP_AT_EOL_OUTPUT)
-        end
-      else
-        if setting
-          setconsolemode(mode & ~ENABLE_WRAP_AT_EOL_OUTPUT)
-        else
-          setconsolemode(mode | ENABLE_WRAP_AT_EOL_OUTPUT)
-        end
-      end
-    else
-      block.call if block
-    end
+    block.call if block
   end
 
   class KeyEventRecord
