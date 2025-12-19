@@ -3,8 +3,8 @@ require 'fiddle/import'
 class Reline::Windows < Reline::IO
 
   attr_writer :output
-  attr_reader :jruby_p
-  alias flush_before_control? jruby_p
+  attr_reader :java_p
+  alias flush_before_control? java_p
 
   def initialize
     @input_buf = []
@@ -34,7 +34,12 @@ class Reline::Windows < Reline::IO
     @WaitForSingleObject = Win32API.new('kernel32', 'WaitForSingleObject', ['L', 'L'], 'L')
 
     @legacy_console = getconsolemode & ENABLE_VIRTUAL_TERMINAL_PROCESSING == 0
-    @jruby_p = RUBY_ENGINE == 'jruby'
+    @java_p = RUBY_PLATFORM == "java"
+    if @java_p && @legacy_console
+      setconsolemode(getconsolemode() | ENABLE_VIRTUAL_TERMINAL_PROCESSING)
+      @legacy_console = getconsolemode & ENABLE_VIRTUAL_TERMINAL_PROCESSING == 0
+      self.class.const_set(:RESET_COLOR, "") if @legacy_console
+    end
   end
 
   def encoding
