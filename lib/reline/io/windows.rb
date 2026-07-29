@@ -304,12 +304,13 @@ class Reline::Windows < Reline::IO
         @legacy_console = getconsolemode & ENABLE_VIRTUAL_TERMINAL_PROCESSING == 0
         next
       end
-      next if @GetNumberOfConsoleInputEvents.(@hConsoleInputHandle, num_of_events) == 0 or num_of_events.unpack1('L') == 0
-      input_records = 0.chr * 20 * 80
+      next if @GetNumberOfConsoleInputEvents.(@hConsoleInputHandle, num_of_events) == 0
+      next if (nevents = num_of_events.unpack1('L')) == 0
+      nevents = 80 if nevents > 80
+      input_records = 0.chr * (20 * nevents)
       read_event = 0.chr * 4
-      if @ReadConsoleInputW.(@hConsoleInputHandle, input_records, 80, read_event) != 0
-        read_events = read_event.unpack1('L')
-        0.upto(read_events) do |idx|
+      if @ReadConsoleInputW.(@hConsoleInputHandle, input_records, nevents, read_event) != 0
+        read_event.unpack1('L').times do |idx|
           input_record = input_records[idx * 20, 20]
           event = input_record[0, 2].unpack1('s*')
           case event
